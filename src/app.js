@@ -10,16 +10,15 @@ import { ApiError } from './utils/apiError.js';
 
 const app = express();
 
-// Security Headers
-app.use(helmet());
-
-// Cross-Origin Resource Sharing
+// Security Headers configured for cross-origin resources
 app.use(
-  cors({
-    origin: env.CLIENT_URL || '*',
-    credentials: true,
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
+
+// Cross-Origin Resource Sharing
+app.use(cors());
 
 // Global Rate Limiting
 app.use(globalLimiter);

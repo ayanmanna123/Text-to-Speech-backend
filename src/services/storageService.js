@@ -1,15 +1,18 @@
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { STORAGE_BUCKET } from '../config/constants.js';
 import { logger } from '../config/logger.js';
-import { ApiError } from '../utils/apiError.js';
 
 export class StorageService {
   /**
-   * Upload audio buffer to Supabase Storage bucket
+   * Upload audio buffer to Supabase Storage bucket with Base64 Data URI fallback
    */
   static async uploadAudio({ buffer, filename, contentType = 'audio/mpeg' }) {
     const supabaseAdmin = getSupabaseAdmin();
     const filePath = `generations/${Date.now()}_${filename}`;
+
+    // Base64 Data URI fallback guaranteeing immediate browser playback even if Supabase Storage is unconfigured
+    const base64Audio = buffer.toString('base64');
+    const dataUriFallback = `data:${contentType};base64,${base64Audio}`;
 
     try {
       const { data, error } = await supabaseAdmin.storage
@@ -20,11 +23,10 @@ export class StorageService {
         });
 
       if (error) {
-        logger.error(`Supabase Storage upload error: ${error.message}`);
-        // Return a mock URL if bucket doesn't exist yet in Supabase
+        logger.warn(`Supabase Storage upload warning: ${error.message}. Serving audio via Data URI stream.`);
         return {
           filePath,
-          publicUrl: `https://placeholder-storage.supabase.co/${filePath}`,
+          publicUrl: dataUriFallback,
         };
       }
 
@@ -34,13 +36,13 @@ export class StorageService {
 
       return {
         filePath: data.path,
-        publicUrl: publicUrlData.publicUrl,
+        publicUrl: publicUrlData.publicUrl || dataUriFallback,
       };
     } catch (err) {
-      logger.error('Failed to upload audio to Supabase storage:', err);
+      logger.warn('Serving audio via Data URI stream fallback:', err.message);
       return {
         filePath,
-        publicUrl: `https://placeholder-storage.supabase.co/${filePath}`,
+        publicUrl: dataUriFallback,
       };
     }
   }

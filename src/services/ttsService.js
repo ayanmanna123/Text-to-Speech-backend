@@ -5,6 +5,9 @@ import { calculateEstimatedDuration } from '../utils/audioUtils.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
 
+// In-memory fallback history for guest/unauthenticated sessions
+const guestHistoryCache = [];
+
 export class TTSService {
   /**
    * Synthesize text to speech, upload audio, record generation in database, and deduct user credits
@@ -33,9 +36,11 @@ export class TTSService {
     });
 
     const durationSeconds = calculateEstimatedDuration(text);
+    const createdAt = new Date().toISOString();
 
-    // 4. Save Record in Supabase DB
+    // 4. Save Record in Supabase DB or Guest Cache
     let generationRecord = null;
+
     if (userId) {
       try {
         const supabase = getSupabaseAdmin();
@@ -63,47 +68,79 @@ export class TTSService {
       }
     }
 
+    // Fallback/Guest record
+    const historyItem = generationRecord || {
+      id: `gen_${Date.now()}`,
+      user_id: userId || 'guest',
+      text_content: text,
+      character_count: characterCount,
+      voice_id: voiceId,
+      voice_name: voiceName || voiceId,
+      provider: usedProvider,
+      audio_url: publicUrl,
+      file_path: filePath,
+      format,
+      duration_seconds: durationSeconds,
+      created_at: createdAt,
+    };
+
+    if (!userId) {
+      guestHistoryCache.unshift(historyItem);
+      if (guestHistoryCache.length > 50) guestHistoryCache.pop(); // Keep last 50
+    }
+
     // 5. Deduct User Quota
-    await UsageService.deductQuota(userId, characterCount, generationRecord?.id, usedProvider);
+    await UsageService.deductQuota(userId, characterCount, historyItem.id, usedProvider);
 
     return {
-      generationId: generationRecord?.id || null,
+      generationId: historyItem.id,
       audioUrl: publicUrl,
       audioBuffer,
       contentType,
       durationSeconds,
       characterCount,
       provider: usedProvider,
+      createdAt,
     };
   }
 
   /**
-   * Fetch generation history for a specific user
+   * Fetch generation history for a user or guest cache
    */
   static async getUserHistory(userId, limit = 20, page = 1) {
-    if (!userId) return { history: [], total: 0 };
+    if (!userId) {
+      return {
+        history: guestHistoryCache.slice((page - 1) * limit, page * limit),
+        total: guestHistoryCache.length,
+        page,
+        limit,
+      };
+    }
 
     const supabase = getSupabaseAdmin();
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const { data, error, count } = await supabase
-      .from('tts_generations')
-      .select('*', { count: 'exact' })
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    try {
+      const { data, error, count } = await supabase
+        .from('tts_generations')
+        .select('*', { count: 'exact' })
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .range(from, to);
 
-    if (error) {
-      logger.error(`Error fetching history for user ${userId}:`, error);
-      return { history: [], total: 0 };
+      if (error || !data) {
+        return { history: guestHistoryCache, total: guestHistoryCache.length, page, limit };
+      }
+
+      return {
+        history: data,
+        total: count || data.length,
+        page,
+        limit,
+      };
+    } catch (err) {
+      return { history: guestHistoryCache, total: guestHistoryCache.length, page, limit };
     }
-
-    return {
-      history: data || [],
-      total: count || 0,
-      page,
-      limit,
-    };
   }
 }

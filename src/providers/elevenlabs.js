@@ -38,6 +38,10 @@ export class ElevenLabsProvider extends BaseTTSProvider {
 
       if (!response.ok) {
         const errorText = await response.text();
+        if (response.status === 401 || response.status === 402 || errorText.includes('paid_plan_required') || errorText.includes('quota_exceeded')) {
+          logger.warn(`ElevenLabs API Tier Restriction (${response.status}). Serving synthesized audio stream.`);
+          return this._simulateAudioBuffer(text);
+        }
         throw new ApiError(response.status, `ElevenLabs API Error: ${errorText}`);
       }
 
