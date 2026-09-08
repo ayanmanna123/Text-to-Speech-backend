@@ -2,6 +2,7 @@ import { TTSProviderFactory } from '../providers/providerFactory.js';
 import { StorageService } from './storageService.js';
 import { UsageService } from './usageService.js';
 import { calculateEstimatedDuration } from '../utils/audioUtils.js';
+import { validateSpeakableText } from '../utils/textUtils.js';
 import { getSupabaseAdmin } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
 
@@ -13,7 +14,8 @@ export class TTSService {
    * Synthesize text to speech, upload audio, record generation in database, and deduct user credits
    */
   static async generateSpeech({ userId, text, voiceId, voiceName, provider, format = 'mp3', settings = {} }) {
-    const characterCount = text.length;
+    const sanitizedText = validateSpeakableText(text);
+    const characterCount = sanitizedText.length;
 
     // 1. Verify User Quota
     await UsageService.verifyQuota(userId, characterCount);
@@ -21,7 +23,7 @@ export class TTSService {
     // 2. Obtain Driver and Synthesize Speech
     const driver = TTSProviderFactory.getProvider(provider);
     const { audioBuffer, contentType, provider: usedProvider } = await driver.generateSpeech({
-      text,
+      text: sanitizedText,
       voiceId,
       format,
       settings,
@@ -35,7 +37,7 @@ export class TTSService {
       contentType,
     });
 
-    const durationSeconds = calculateEstimatedDuration(text);
+    const durationSeconds = calculateEstimatedDuration(sanitizedText);
     const createdAt = new Date().toISOString();
 
     // 4. Save Record in Supabase DB or Guest Cache
@@ -48,7 +50,7 @@ export class TTSService {
           .from('tts_generations')
           .insert({
             user_id: userId,
-            text_content: text,
+            text_content: sanitizedText,
             character_count: characterCount,
             voice_id: voiceId,
             voice_name: voiceName || voiceId,
@@ -72,7 +74,7 @@ export class TTSService {
     const historyItem = generationRecord || {
       id: `gen_${Date.now()}`,
       user_id: userId || 'guest',
-      text_content: text,
+      text_content: sanitizedText,
       character_count: characterCount,
       voice_id: voiceId,
       voice_name: voiceName || voiceId,
