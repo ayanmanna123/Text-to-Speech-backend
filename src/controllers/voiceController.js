@@ -3,13 +3,14 @@ import { sendSuccess } from '../utils/apiResponse.js';
 
 export const getVoices = async (req, res, next) => {
   try {
-    const { provider, gender, category, search } = req.query;
+    const { provider, gender, category, search, language } = req.query;
 
     const voices = await VoiceService.getAllVoices({
       provider,
       gender,
       category,
       search,
+      language,
     });
 
     return sendSuccess(res, {

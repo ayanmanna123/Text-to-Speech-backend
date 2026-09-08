@@ -6,5 +6,6 @@ export const getVoicesSchema = z.object({
     gender: z.string().optional(),
     category: z.string().optional(),
     search: z.string().optional(),
+    language: z.string().optional(),
   }),
 });

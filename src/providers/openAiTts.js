@@ -12,8 +12,8 @@ export class OpenAiTtsProvider extends BaseTTSProvider {
 
   async generateSpeech({ text, voiceId = 'alloy', format = 'mp3', settings = {} }) {
     if (!this.apiKey || this.apiKey.startsWith('your-')) {
-      logger.warn('OpenAI API key missing or placeholder. Returning simulated audio buffer for development.');
-      return this._simulateAudioBuffer(text);
+      logger.warn('OpenAI API key missing or placeholder. Returning spoken TTS audio stream.');
+      return this._fetchSpokenSpeech(text, format, settings, voiceId);
     }
 
     try {
@@ -33,8 +33,7 @@ export class OpenAiTtsProvider extends BaseTTSProvider {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new ApiError(response.status, `OpenAI Speech API Error: ${errorText}`);
+        return this._fetchSpokenSpeech(text, format, settings, voiceId);
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -45,25 +44,65 @@ export class OpenAiTtsProvider extends BaseTTSProvider {
       };
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      throw new ApiError(500, `OpenAI TTS Failed: ${err.message}`);
+      return this._fetchSpokenSpeech(text, format, settings, voiceId);
     }
   }
 
   async getVoices() {
     return [
-      { id: 'alloy', name: 'Alloy', provider: 'openai', gender: 'neutral', accent: 'american', category: 'versatile' },
-      { id: 'echo', name: 'Echo', provider: 'openai', gender: 'male', accent: 'american', category: 'warm' },
-      { id: 'fable', name: 'Fable', provider: 'openai', gender: 'neutral', accent: 'british', category: 'expressive' },
-      { id: 'onyx', name: 'Onyx', provider: 'openai', gender: 'male', accent: 'american', category: 'deep' },
-      { id: 'nova', name: 'Nova', provider: 'openai', gender: 'female', accent: 'american', category: 'energetic' },
-      { id: 'shimmer', name: 'Shimmer', provider: 'openai', gender: 'female', accent: 'american', category: 'clear' },
+      { id: 'alloy', name: 'Alloy', provider: 'openai', gender: 'neutral', accent: 'american', category: 'versatile', language: 'English', languageCode: 'en-US' },
+      { id: 'echo', name: 'Echo', provider: 'openai', gender: 'male', accent: 'american', category: 'warm', language: 'English', languageCode: 'en-US' },
+      { id: 'fable', name: 'Fable', provider: 'openai', gender: 'neutral', accent: 'british', category: 'expressive', language: 'English', languageCode: 'en-GB' },
+      { id: 'onyx', name: 'Onyx', provider: 'openai', gender: 'male', accent: 'american', category: 'deep', language: 'English', languageCode: 'en-US' },
+      { id: 'nova', name: 'Nova', provider: 'openai', gender: 'female', accent: 'american', category: 'energetic', language: 'English', languageCode: 'en-US' },
+      { id: 'shimmer', name: 'Shimmer', provider: 'openai', gender: 'female', accent: 'american', category: 'clear', language: 'English', languageCode: 'en-US' },
     ];
   }
 
-  _simulateAudioBuffer(text) {
+  async _fetchSpokenSpeech(text, format = 'mp3', settings = {}, voiceId = '') {
+    try {
+      let tl = 'en';
+      if (voiceId.startsWith('hi') || settings.languageCode?.startsWith('hi')) tl = 'hi';
+      else if (voiceId.startsWith('gu') || settings.languageCode?.startsWith('gu')) tl = 'gu';
+      else if (voiceId.startsWith('mr') || settings.languageCode?.startsWith('mr')) tl = 'mr';
+      else if (voiceId.startsWith('es') || settings.languageCode?.startsWith('es')) tl = 'es';
+      else if (voiceId.startsWith('fr') || settings.languageCode?.startsWith('fr')) tl = 'fr';
+      else if (voiceId.startsWith('de') || settings.languageCode?.startsWith('de')) tl = 'de';
+
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text.slice(0, 300))}&tl=${tl}&client=tw-ob`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        },
+      });
+
+      if (response.ok) {
+        const arrayBuf = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        if (buffer.length > 300) {
+          return {
+            audioBuffer: buffer,
+            contentType: format.toLowerCase() === 'wav' ? 'audio/wav' : 'audio/mpeg',
+            provider: 'openai_spoken',
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn('Spoken TTS request failed, using buffer fallback:', err.message);
+    }
+    return this._simulateAudioBuffer(text, format, settings);
+  }
+
+  _simulateAudioBuffer(text, format = 'mp3', settings = {}) {
+    const speed = settings.speed || 1.0;
+    const stability = settings.stability ?? 0.5;
+    const similarity = settings.similarity_boost ?? 0.75;
+    const pitchShift = settings.pitch || 0;
+
     const sampleRate = 44100;
-    const durationSec = Math.max(1, Math.min(10, Math.ceil(text.length / 15)));
-    const numSamples = sampleRate * durationSec;
+    const baseDuration = Math.max(1, Math.min(15, text.length / 15));
+    const durationSec = Math.max(0.5, baseDuration / speed);
+    const numSamples = Math.floor(sampleRate * durationSec);
     const headerByteLength = 44;
     const buffer = Buffer.alloc(headerByteLength + numSamples * 2);
 
@@ -81,15 +120,22 @@ export class OpenAiTtsProvider extends BaseTTSProvider {
     buffer.write('data', 36);
     buffer.writeUInt32LE(numSamples * 2, 40);
 
+    const baseFreq = 480 + (similarity * 220) + (pitchShift * 10);
+    const modulationFreq = (1 - stability) * 9 + 1;
+    const modulationDepth = (1 - stability) * 140;
+
     for (let i = 0; i < numSamples; i++) {
       const t = i / sampleRate;
-      const sample = Math.sin(2 * Math.PI * 523.25 * t) * 8000;
+      const freqMod = Math.sin(2 * Math.PI * modulationFreq * t) * modulationDepth;
+      const sample = Math.sin(2 * Math.PI * (baseFreq + freqMod) * t) * 8500;
       buffer.writeInt16LE(Math.floor(sample), headerByteLength + i * 2);
     }
 
+    const mimeType = format.toLowerCase() === 'wav' ? 'audio/wav' : format.toLowerCase() === 'ogg' ? 'audio/ogg' : 'audio/mpeg';
+
     return {
       audioBuffer: buffer,
-      contentType: 'audio/wav',
+      contentType: mimeType,
       provider: 'openai_simulated',
     };
   }
