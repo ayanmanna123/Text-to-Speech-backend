@@ -1,5 +1,7 @@
 import { ApiError } from './apiError.js';
 
+export const MAX_TEXT_LENGTH = 5000;
+
 /**
  * Sanitize input text by removing unprintable control characters, zero-width spaces, and invalid Unicode sequences.
  */
@@ -17,21 +19,36 @@ export function sanitizeText(text = '') {
 }
 
 /**
- * Validate that sanitized text contains speakable characters (alphanumeric, letters across languages, or standard punctuation).
+ * Validate input text against rules:
+ * 1. Must not be empty
+ * 2. Must not exceed maximum length (5000 characters)
+ * 3. Unsupported/unprintable characters sanitized & validated for speakable content
  */
 export function validateSpeakableText(text = '') {
+  // 1. Text must not be empty
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    throw new ApiError(400, 'Text must not be empty. Please provide valid text to convert.');
+  }
+
+  // 2. Text should have a maximum length limit
+  if (text.length > MAX_TEXT_LENGTH) {
+    throw new ApiError(400, `Text exceeds maximum allowed length of ${MAX_TEXT_LENGTH} characters per request.`);
+  }
+
+  // 3. Handle unsupported characters appropriately
   const sanitized = sanitizeText(text);
 
   if (!sanitized) {
-    throw new ApiError(400, 'Text contains no valid printable characters for speech synthesis.');
+    throw new ApiError(400, 'Text contains no valid speakable characters after removing unprintable symbols.');
   }
 
-  // Check if string contains at least one letter, digit, or valid language script character
+  // Check if string contains at least one letter, digit, or valid language script character across Unicode
   const hasSpeakableContent = /[\p{L}\p{N}]/u.test(sanitized);
 
   if (!hasSpeakableContent) {
-    throw new ApiError(400, 'Text contains only unsupported symbols or unprintable characters. Please enter speakable words or text.');
+    throw new ApiError(400, 'Text contains only unsupported symbols or emojis without speakable words. Please enter valid text.');
   }
 
   return sanitized;
 }
+
