@@ -22,3 +22,24 @@ export const getVoices = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getVoicePreview = async (req, res, next) => {
+  try {
+    const { voiceId, voiceName, provider, sampleText } = req.body;
+
+    const result = await VoiceService.getOrGenerateVoicePreview({
+      voiceId,
+      voiceName,
+      provider,
+      sampleText,
+    });
+
+    return sendSuccess(res, {
+      message: result.cached ? 'Voice preview retrieved from cache' : 'Voice preview generated and saved',
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
