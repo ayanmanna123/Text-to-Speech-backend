@@ -17,7 +17,46 @@ export class TTSService {
     const sanitizedText = validateSpeakableText(text);
     const characterCount = sanitizedText.length;
 
-    // 1. Verify User Quota
+    // 1. Check if matching audio generation already exists
+    let existingRecord = null;
+    if (userId) {
+      try {
+        const supabase = getSupabaseAdmin();
+        const { data } = await supabase
+          .from('tts_generations')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('text_content', sanitizedText)
+          .eq('voice_id', voiceId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data) existingRecord = data;
+      } catch (err) {
+        logger.warn('Failed checking existing generation record in DB:', err);
+      }
+    } else {
+      existingRecord = guestHistoryCache.find(
+        (item) =>
+          item.text_content === sanitizedText &&
+          (item.voice_id === voiceId || item.voice_name === voiceName)
+      );
+    }
+
+    if (existingRecord) {
+      logger.info(`Reusing existing cached TTS generation for text: "${sanitizedText.substring(0, 30)}..."`);
+      return {
+        generationId: existingRecord.id,
+        audioUrl: existingRecord.audio_url || existingRecord.audioUrl,
+        durationSeconds: existingRecord.duration_seconds || existingRecord.durationSeconds,
+        characterCount: existingRecord.character_count || existingRecord.characterCount || characterCount,
+        provider: existingRecord.provider,
+        createdAt: existingRecord.created_at || new Date().toISOString(),
+        isCached: true,
+      };
+    }
+
+    // 2. Verify User Quota
     await UsageService.verifyQuota(userId, characterCount);
 
     // 2. Obtain Driver and Synthesize Speech
