@@ -7,7 +7,7 @@ import { getSupabaseAdmin } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
 
 // In-memory fallback history for guest/unauthenticated sessions
-const guestHistoryCache = [];
+export const guestHistoryCache = [];
 
 export class TTSService {
   /**

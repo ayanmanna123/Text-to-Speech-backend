@@ -2,13 +2,26 @@ import { getSupabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../utils/apiError.js';
 import { logger } from '../config/logger.js';
 import { DEFAULT_USER_QUOTA } from '../config/constants.js';
+import { guestHistoryCache } from './ttsService.js';
 
 export class UsageService {
   /**
    * Check if user has sufficient character quota remaining
    */
   static async verifyQuota(userId, characterCount) {
-    if (!userId) return true; // Unauthenticated/demo mode bypass
+    if (!userId) {
+      const guestUsed = guestHistoryCache.reduce(
+        (sum, item) => sum + (item.character_count || item.characterCount || 0),
+        0
+      );
+      const remaining = DEFAULT_USER_QUOTA.FREE_CHARACTERS - guestUsed;
+      if (remaining < characterCount) {
+        throw ApiError.quotaExceeded(
+          `Insufficient character credits. Required: ${characterCount}, Available: ${remaining}`
+        );
+      }
+      return true;
+    }
 
     const supabase = getSupabaseAdmin();
     const { data: profile, error } = await supabase
@@ -70,11 +83,16 @@ export class UsageService {
    */
   static async getUserUsage(userId) {
     if (!userId) {
+      const guestUsed = guestHistoryCache.reduce(
+        (sum, item) => sum + (item.character_count || item.characterCount || 0),
+        0
+      );
+      const quota = DEFAULT_USER_QUOTA.FREE_CHARACTERS;
       return {
         tier: 'free',
-        characterQuota: DEFAULT_USER_QUOTA.FREE_CHARACTERS,
-        charactersUsed: 0,
-        charactersRemaining: DEFAULT_USER_QUOTA.FREE_CHARACTERS,
+        characterQuota: quota,
+        charactersUsed: guestUsed,
+        charactersRemaining: Math.max(0, quota - guestUsed),
       };
     }
 
