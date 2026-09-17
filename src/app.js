@@ -18,7 +18,21 @@ app.use(
 );
 
 // Cross-Origin Resource Sharing
-app.use(cors());
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (!env.CLIENT_URL || env.CLIENT_URL === '*' || env.CLIENT_URL === origin || origin.includes('vercel.app') || origin.includes('localhost')) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with'],
+};
+
+app.use(cors(corsOptions));
 
 // Global Rate Limiting
 app.use(globalLimiter);
